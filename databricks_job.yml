@@ -1,0 +1,81 @@
+# Databricks Workflow that runs this dbt project on a schedule.
+#
+# Deploy with:  databricks bundle deploy -t prod
+#
+# The key idea: git_source. The job runs the code that is IN GITHUB on the
+# main branch - not a copy someone pasted into the workspace. Production
+# therefore runs exactly what was reviewed and merged, and nobody can change
+# prod logic by clicking around in the UI.
+
+bundle:
+  name: dbt_databricks_learning
+
+resources:
+  jobs:
+    dbt_daily:
+      name: "[${bundle.target}] dbt daily build"
+
+      # Runs what is on main in GitHub.
+      git_source:
+        git_url: https://github.com/YOUR-USER/dbt-databricks-learning
+        git_provider: gitHub
+        git_branch: main
+
+      schedule:
+        quartz_cron_expression: "0 0 5 * * ?"    # 05:00 daily
+        timezone_id: "America/New_York"
+        pause_status: UNPAUSED
+
+      tasks:
+        # Snapshots run FIRST and alone. A snapshot only captures what it sees
+        # when it runs; a missed run loses that history permanently and it
+        # cannot be backfilled. That is why it is not bundled with the build.
+        - task_key: dbt_snapshot
+          dbt_task:
+            project_directory: ""
+            commands:
+              - "dbt deps"
+              - "dbt snapshot --target prod"
+            warehouse_id: ${var.warehouse_id}
+
+        - task_key: dbt_build
+          depends_on:
+            - task_key: dbt_snapshot
+          dbt_task:
+            project_directory: ""
+            commands:
+              - "dbt deps"
+              # build = models AND tests, in dependency order, stopping at the
+              # first failure so bad data does not propagate downstream.
+              - "dbt build --target prod"
+            warehouse_id: ${var.warehouse_id}
+
+        # Catches an upstream that silently stopped delivering - the one
+        # failure mode no downstream test can detect.
+        - task_key: source_freshness
+          depends_on:
+            - task_key: dbt_build
+          dbt_task:
+            project_directory: ""
+            commands:
+              - "dbt deps"
+              - "dbt source freshness --target prod"
+            warehouse_id: ${var.warehouse_id}
+
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+
+      max_concurrent_runs: 1
+
+variables:
+  warehouse_id:
+    description: SQL warehouse the dbt task runs against
+    default: ""
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production

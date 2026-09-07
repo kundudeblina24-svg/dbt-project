@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: fct_orders
+    description: "Fact table. Grain: one row per order, payments rolled up."
+    columns:
+      - name: order_id
+        description: Primary key. This `unique` test IS the grain assertion.
+        tests: [unique, not_null]
+      - name: total_paid
+        tests: [not_null]
+
+  - name: dim_customers
+    description: "Dimension. Grain: one row per customer."
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: customer_segment
+        tests:
+          - accepted_values:
+              values: ['never_ordered', 'one_time', 'repeat', 'loyal']
+
+  - name: fct_daily_orders
+    description: Orders and revenue per day. Incremental, merge, 7-day lookback.
+    columns:
+      - name: order_date
+        tests: [unique, not_null]

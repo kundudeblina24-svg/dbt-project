@@ -1,0 +1,78 @@
+version: 2
+
+# ============================================================================
+# TWO SOURCES, ON PURPOSE - this is the bit interviewers ask about
+# ============================================================================
+#
+# A dbt "source" is just a declaration: "this table already exists, I did not
+# build it, but my models read from it." You then write {{ source(...) }}
+# instead of typing a table name. Two reasons that matters:
+#   1. dbt draws the lineage graph from it
+#   2. if the table moves, you change ONE yml file, not twenty models
+#
+# Source 1 = an EXTERNAL DATABASE (Postgres), reached through Lakehouse
+#            Federation. Databricks connects to the outside database and
+#            exposes it as a "foreign catalog" you can query with plain SQL.
+#            No copying, no ingestion job.
+#
+# Source 2 = a UNITY CATALOG table that already lives in Databricks.
+#
+# The models below cannot tell the difference, and that is the whole point of
+# federation: `database:` just points at a different catalog.
+# ============================================================================
+
+sources:
+
+  # ---------------------------------------------------------------- SOURCE 1
+  - name: erp_postgres
+    description: >
+      Customer master from the ERP Postgres database, read through Lakehouse
+      Federation as a foreign catalog. Nothing is copied into Databricks - the
+      query is pushed down to Postgres at run time.
+    database: "{{ env_var('DBT_SOURCE_CATALOG', 'workspace') }}"
+    schema: learn_raw
+
+    # IN PRODUCTION this would be the federated foreign catalog, created once:
+    #
+    #   CREATE CONNECTION erp_pg TYPE postgresql
+    #     OPTIONS (host '...', port '5432', user secret(...), password secret(...));
+    #   CREATE FOREIGN CATALOG pg_erp USING CONNECTION erp_pg
+    #     OPTIONS (database 'erp');
+    #
+    # and then you would set   database: pg_erp   and   schema: public
+    # Nothing else in this project would change. That is the demo.
+
+    tables:
+      - name: customers
+        description: One row per customer in the ERP system.
+        columns:
+          - name: customer_id
+            tests: [unique, not_null]
+
+  # ---------------------------------------------------------------- SOURCE 2
+  - name: lakehouse
+    description: >
+      Order and payment tables already managed inside Unity Catalog - landed by
+      an upstream ingestion job (Auto Loader, DLT, or a partner feed).
+    database: "{{ env_var('DBT_SOURCE_CATALOG', 'workspace') }}"
+    schema: learn_raw
+
+    # Freshness turns "did the upstream job actually run?" into a test.
+    # Run it with:  dbt source freshness
+    freshness:
+      warn_after:  {count: 12, period: hour}
+      error_after: {count: 24, period: hour}
+    loaded_at_field: _loaded_at
+
+    tables:
+      - name: orders
+        description: One row per order.
+        columns:
+          - name: order_id
+            tests: [unique, not_null]
+
+      - name: payments
+        description: One row per payment. Negative amounts are refunds.
+        columns:
+          - name: payment_id
+            tests: [unique, not_null]

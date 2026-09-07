@@ -1,0 +1,37 @@
+# The Databricks connection.
+#
+# NOTHING SECRET IS IN THIS FILE. Every value comes from an environment
+# variable, so this is safe to commit to GitHub. The actual token lives in a
+# .env file that is gitignored.
+#
+# Where each value comes from:
+#   DATABRICKS_HOST       workspace URL, no trailing slash
+#   DATABRICKS_HTTP_PATH  SQL Warehouse -> Connection details -> HTTP path
+#   DATABRICKS_TOKEN      Settings -> Developer -> Access tokens
+#   DBT_CATALOG           the Unity Catalog catalog you are writing into
+
+dbt_databricks_learning:
+  target: dev
+  outputs:
+
+    dev:
+      type: databricks
+      host:      "{{ env_var('DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token:     "{{ env_var('DATABRICKS_TOKEN') }}"
+
+      # Unity Catalog is a THREE level namespace: catalog.schema.table
+      # `catalog` is level 1, `schema` is the default level 2.
+      catalog:   "{{ env_var('DBT_CATALOG', 'workspace') }}"
+      schema:    gold
+
+      threads: 2
+
+    prod:
+      type: databricks
+      host:      "{{ env_var('DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DATABRICKS_HTTP_PATH') }}"
+      token:     "{{ env_var('DATABRICKS_TOKEN') }}"
+      catalog:   "{{ env_var('DBT_CATALOG_PROD', 'workspace') }}"
+      schema:    gold
+      threads: 4

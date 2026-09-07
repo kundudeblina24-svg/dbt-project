@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: stg_customers
+    description: "Cleaned customers. Source: EXTERNAL Postgres via Lakehouse Federation."
+    columns:
+      - name: customer_id
+        tests: [unique, not_null]
+      - name: email
+        description: One customer has no email - deliberate, so you see a warning.
+        tests:
+          # severity warn = report it, do not fail the build.
+          # A missing email is a data-entry issue, not a broken pipeline.
+          - not_null:
+              config: {severity: warn}
+
+  - name: stg_orders
+    description: "Cleaned orders. Source: Unity Catalog table."
+    columns:
+      - name: order_id
+        tests: [unique, not_null]
+      - name: customer_id
+        description: >
+          One order points at a customer who does not exist. Set to warn so you
+          can SEE a failing test without the project going red. Run `dbt test`
+          and read the output - that is the lesson.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_customers')
+              field: customer_id
+              config: {severity: warn}
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: ['placed', 'shipped', 'delivered', 'returned', 'cancelled']
+
+  - name: stg_payments
+    description: "Cleaned payments. Source: Unity Catalog table."
+    columns:
+      - name: payment_id
+        tests: [unique, not_null]
+      - name: payment_method
+        tests:
+          - accepted_values:
+              values: ['card', 'paypal', 'bank_transfer', 'wallet']

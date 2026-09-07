@@ -1,0 +1,35 @@
+# This file is what makes a folder "a dbt project".
+name: 'dbt_databricks_learning'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dbt_databricks_learning'      # which connection to use (profiles.yml)
+
+model-paths:    ["models"]
+test-paths:     ["tests"]
+macro-paths:    ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"          # compiled SQL lands here - open it, it is useful
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # A lookback window for the incremental model. Kept as a var so you change
+  # it in one place instead of editing SQL.
+  lookback_days: 7
+
+models:
+  dbt_databricks_learning:
+    +file_format: delta        # Databricks default; stated so it is obvious
+
+    staging:
+      +materialized: view      # cheap, always fresh, stores nothing
+      +schema: staging         # -> lands in <catalog>.staging
+
+    marts:
+      +materialized: table     # queried repeatedly, so build it once
+      +schema: gold            # -> lands in <catalog>.gold
+
+snapshots:
+  dbt_databricks_learning:
+    +target_schema: snapshots
