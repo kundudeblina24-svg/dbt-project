@@ -7,3 +7,6 @@ __pycache__/
 .venv/
 
 # env.sh contains no secrets (it sources .env) - safe to commit
+
+# Databricks CLI local bundle state (contains workspace host + warehouse id)
+.databricks/

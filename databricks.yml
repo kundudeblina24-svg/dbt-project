@@ -1,0 +1,160 @@
+# Databricks Asset Bundle (DAB)
+#
+# A bundle is infrastructure-as-code for Databricks: jobs, pipelines and their
+# config defined in YAML, version controlled, and deployed with one command
+# across dev / staging / prod.
+#
+#   databricks bundle validate            # check the config
+#   databricks bundle deploy -t dev       # create/update the job
+#   databricks bundle run dbt_daily -t dev
+#   databricks bundle destroy -t dev      # tear it down
+#
+# Why this matters: it is the mechanism that makes "all changes go through Git"
+# enforceable rather than just a policy. Nobody clicks a job definition together
+# in the UI and forgets what they did.
+
+bundle:
+  name: dbt_databricks_learning
+
+# IMPORTANT: bundle sync uploads this directory to the workspace, and it does
+# NOT read .gitignore. Without these excludes your .env - containing the token -
+# gets uploaded. Always set this explicitly.
+sync:
+  exclude:
+    - .env
+    - .git/
+    - target/
+    - logs/
+    - dbt_packages/
+    - "*.duckdb"
+
+variables:
+  warehouse_id:
+    description: SQL Warehouse the dbt task executes against
+    default: ""
+  catalog:
+    description: Unity Catalog catalog to build into
+    default: workspace
+
+targets:
+  dev:
+    mode: development       # prefixes resources with [dev yourname] and pauses schedules
+    default: true
+    variables:
+      catalog: workspace
+
+  prod:
+    mode: production        # no prefixing; schedules run
+    variables:
+      catalog: workspace
+
+resources:
+  jobs:
+
+    dbt_daily:
+      name: dbt daily build
+
+      # ---------------------------------------------------------------------
+      # Serverless. No cluster to size, starts in seconds.
+      # dbt itself is lightweight - it parses the DAG and issues SQL. The heavy
+      # lifting happens on the SQL Warehouse below, so the compute running dbt
+      # barely matters. Sizing the WAREHOUSE is what changes run time.
+      # ---------------------------------------------------------------------
+      # NOTE - no `--target` on the dbt commands.
+      # When you set warehouse_id below, Databricks GENERATES its own
+      # profiles.yml and passes --profiles-dir, which overrides the one in the
+      # repo. That generated profile has its own target name, so passing
+      # `--target prod` fails with:
+      #   "The profile does not have a target named 'prod'"
+      # Let Databricks pick its default target instead.
+
+      environments:
+        - environment_key: default
+          spec:
+            client: "3"
+            dependencies:
+              - dbt-databricks>=1.8,<1.10
+
+      tasks:
+
+        # Snapshots run FIRST, and alone.
+        # A snapshot only captures what it sees WHEN IT RUNS. Miss a run and
+        # that history is gone permanently - it cannot be backfilled, because
+        # the source only holds current state. So it gets its own task, ahead
+        # of everything, and its failure should page someone.
+        - task_key: dbt_snapshot
+          environment_key: default
+          dbt_task:
+            project_directory: ""
+            catalog: ${var.catalog}
+            schema: gold
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - "dbt deps"
+              - "dbt snapshot"
+
+        # build = models AND tests, interleaved in dependency order, stopping
+        # at the first failure. With run-then-test, a broken model has already
+        # pushed bad data through every downstream table before any test fires.
+        - task_key: dbt_build
+          environment_key: default
+          depends_on:
+            - task_key: dbt_snapshot
+          dbt_task:
+            project_directory: ""
+            catalog: ${var.catalog}
+            schema: gold
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - "dbt deps"
+              - "dbt build"
+
+        # Catches an upstream that quietly stopped delivering - the one failure
+        # mode no downstream test can detect. If the data never arrives, every
+        # test on it passes.
+        - task_key: source_freshness
+          environment_key: default
+          depends_on:
+            - task_key: dbt_build
+          dbt_task:
+            project_directory: ""
+            catalog: ${var.catalog}
+            schema: gold
+            warehouse_id: ${var.warehouse_id}
+            commands:
+              - "dbt deps"
+              - "dbt source freshness"
+
+      schedule:
+        quartz_cron_expression: "0 0 5 * * ?"   # 05:00 daily
+        timezone_id: "America/New_York"
+        pause_status: PAUSED                    # unpause deliberately
+
+      email_notifications:
+        on_failure:
+          - ${workspace.current_user.userName}
+
+      max_concurrent_runs: 1
+
+      tags:
+        project: dbt_learning
+        managed_by: asset_bundle
+
+# ---------------------------------------------------------------------------
+# PRODUCTION VARIANT — run straight from GitHub instead of synced files
+#
+# By default a bundle uploads your local files to the workspace. That is fine
+# for dev. In production you usually want the job to run what is IN GIT, so
+# prod executes exactly what was reviewed and merged and nobody can edit
+# production logic by clicking around the workspace.
+#
+# Add this to the job and drop `project_directory: ""`:
+#
+#   git_source:
+#     git_url: https://github.com/kundudeblina24-svg/dbt-project
+#     git_provider: gitHub
+#     git_branch: main
+#
+# A private repo needs a Git credential registered in Databricks first:
+#   Settings -> Linked accounts -> Git integration
+# ---------------------------------------------------------------------------
