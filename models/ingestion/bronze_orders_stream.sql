@@ -5,6 +5,8 @@
 -- STREAM read_files(...) is the SQL form of Auto Loader: same incremental
 -- file tracking, same schema evolution, no PySpark. dbt-databricks supports
 -- materialized='streaming_table', so ingestion CAN live in dbt after all --
+-- Reads orders_seed.csv, created by setup/02_seed_volume.py.
+--
 -- with the caveat that dbt only issues CREATE OR REFRESH; the incremental
 -- bookkeeping is Databricks', not dbt's.
 
@@ -16,5 +18,5 @@ FROM STREAM read_files(
     '/Volumes/workspace/bronze/landing/',
     format         => 'csv',
     header         => true,
-    pathGlobFilter => 'orders*.csv'
+    pathGlobFilter => 'orders_seed*.csv'
 )

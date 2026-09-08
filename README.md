@@ -66,3 +66,27 @@ Done. PASS=31 WARN=2 ERROR=0 SKIP=0 TOTAL=33
 The 2 warnings are deliberate - a missing email and an order pointing at a
 customer who does not exist, so you can see what a failing test looks like
 without the project going red.
+
+---
+
+## First-time setup
+
+The project reads from tables and a volume it does **not** create. Bootstrap
+them once:
+
+```bash
+# 1. create schemas, volume and source tables  (paste into a Databricks SQL editor)
+setup/01_bootstrap.sql
+
+# 2. seed the volume  (only needed for the streaming ingestion model)
+cp .env.example .env        # fill in host, http_path, token
+python setup/02_seed_volume.py
+
+# 3. build
+source env.sh
+dbt debug
+dbt build
+```
+
+Expect `PASS=32 WARN=2 ERROR=0`. The two warnings are deliberate — see
+`START_HERE.md`.
